@@ -1,9 +1,44 @@
 # -*- coding: utf-8 -*-
 import os
 import time
+from typing import Union
+
 from core.tools.serialization import load_tree, save_tree
 
 STRFTIME_TEMP = '%Y-%m-%d %H:%M:%S'
+
+
+class TreeNode(object):
+    """Tree node"""
+
+    # Todo: add __annotations__ for function
+    def __init__(self, name, *args, **kwargs):
+        self.name = name
+        try:
+            self.ctime = kwargs.get('ctime', None)
+            self.atime = kwargs.get('atime', None)
+        except ValueError as e:
+            pass
+
+
+class FileNode(TreeNode):
+    """File Node"""
+    pass
+
+
+class FolderNode(TreeNode):
+    """Folder node"""
+
+    def __init__(self, *args, **kwargs):
+        super(FolderNode, self).__init__(*args, **kwargs)
+        self.subnodes = []
+
+    def add_subnode(self, subnode):
+        self.subnodes.append(subnode)
+
+    def get_subnodes_amount(self):
+        """返回子节点的数量"""
+        return self.subnodes.__len__()
 
 
 class FileTree(object):
@@ -20,33 +55,26 @@ class FileTree(object):
         ex._tree = ex._create_help(folder)
         return ex
 
-    @classmethod
-    def from_json(cls, file):
-        """使用一个JSON文件初始化树"""
-        ex = cls.__new__(cls)
-        ex._tree = load_tree(file)
-        return ex
-
-    def save_json(self, filder):
-        """保存为JSON格式的文件 """
-        save_tree(filder, self._tree)
-
-    def _create_help(self, folder: str) -> dict:
+    def _create_help(self, _path: str) -> Union[FileNode, FolderNode]:
         """
         用于创建树形结构的迭代函数
         
-        :param folder: 
+        :param _path: 
         :return: 
         """
-        rst = {}
-        all = os.listdir(folder)
-        for f in all:
-            whole_f = os.path.join(folder, f)
-            if os.path.isdir(whole_f):
-                rst[f + '/'] = self._get_date(whole_f)
-                rst[f + '/']['subdir'] = self._create_help(whole_f)
-            elif os.path.isfile(whole_f):
-                rst[f] = self._get_date(whole_f)
+        if os.path.isfile(_path):
+            filename = os.path.split(_path)[1]
+            rst = FileNode(filename, **self._get_date(_path))
+        elif os.path.isdir(_path):
+            foldername = _path.split('\\')[-1]
+            rst = FolderNode(foldername, **self._get_date(_path))
+            all = os.listdir(_path)
+
+            for f in all:
+                whole_f = os.path.join(_path, f)
+                rst.add_subnode(self._create_help(whole_f))
+        else:
+            raise Exception()
 
         return rst
 
@@ -63,40 +91,50 @@ class FileTree(object):
         }
         return rst
 
-    def print(self, ctime=False):
+    def deff(self, other):
+        """
+        
+        :param other: other tree deffed
+        :return: None
+        """
+        pass
+
+    def graph(self, ctime=False):
         """
         图形化的树形结构
-
         """
 
-        def get_tree(tree, cur_level, traces={}):
+        def get_tree(tree, cur_level, indention={}):
             """递归的打印tree"""
             rst = ''
 
-            traces[cur_level] = len(tree)
-            for key, value in tree.items():
+            indention[cur_level] = tree.get_subnodes_amount()
+            for subnode in tree.subnodes:
+                subnode.name = subnode.name
+                subnode = subnode
+
                 # FIXME: \n in linux
                 for l in range(cur_level):
-                    rst += '│   ' if traces[l] > 1 else '    '
+                    rst += '│   ' if indention[l] > 1 else '    '
 
                 extra_data = ''
                 #  添加额外的内容
                 if ctime:
-                    extra_data += time.strftime(STRFTIME_TEMP, time.localtime(value['ctime']))
+                    extra_data += time.strftime(STRFTIME_TEMP, time.localtime(subnode.ctime))
 
-                if traces[cur_level] > 1:
-                    rst += '├── {}\t\t\t{}\n'.format(key, extra_data)
-                elif traces[cur_level] == 1:
-                    rst += '└── {}\t\t\t{}\n'.format(key, extra_data)
+                if indention[cur_level] > 1:
+                    rst += '├── {}\t\t\t{}\n'.format(subnode.name, extra_data)
+                elif indention[cur_level] == 1:
+                    rst += '└── {}\t\t\t{}\n'.format(subnode.name, extra_data)
 
-                if key.endswith('/'):
-                    rst += get_tree(value['subdir'], cur_level + 1)
+                if isinstance(subnode, FolderNode):
+                    rst += get_tree(subnode, cur_level + 1)
 
-                traces[cur_level] -= 1
+                indention[cur_level] -= 1
 
             return rst
 
-        print(get_tree(self._tree, 0))
+        return get_tree(self._tree, 0)
 
     def __str__(self):
         return "<FileTree {}>".format(self._tree)

@@ -1,3 +1,4 @@
 # -*- coding: utf-8 -*-
-from .testserialization import *
+
+from .coretest import *
 from .tools import *

@@ -3,7 +3,7 @@ import os
 import time
 from typing import Union
 
-from core.tools.serialization import load_tree, save_tree
+from .tools.serialization import load_dict, save_dict
 
 STRFTIME_TEMP = '%Y-%m-%d %H:%M:%S'
 
@@ -12,13 +12,34 @@ class TreeNode(object):
     """Tree node"""
 
     # Todo: add __annotations__ for function
-    def __init__(self, name, *args, **kwargs):
+    def __init__(self, name=None, *args, **kwargs):
         self.name = name
         try:
             self.ctime = kwargs.get('ctime', None)
             self.atime = kwargs.get('atime', None)
         except ValueError as e:
             pass
+
+    def __eq__(self, other):
+        if len(self.__dict__) != len(other.__dict__):
+            return False
+
+        if not isinstance(other, self.__class__):
+            return False
+
+        for k, v in self.__dict__.items():
+            if any([lambda x: isinstance(t, x) for t in [str, int, float]]):
+                if v != other.__dict__.get(k, None):
+                    return False
+
+        return True
+
+    def __repr__(self):
+        return "< {}'s object name: {} >".format(self.__class__, self.name)
+
+    def __hash__(self):
+        # FIXME: 这个hash只是能用， 我不知道是否是合适的写法
+        return hash(''.join([k+str(v) for k, v in self.__dict__.items()]))
 
 
 class FileNode(TreeNode):
@@ -31,14 +52,28 @@ class FolderNode(TreeNode):
 
     def __init__(self, *args, **kwargs):
         super(FolderNode, self).__init__(*args, **kwargs)
-        self.subnodes = []
+        self._subnodes = []
 
     def add_subnode(self, subnode):
-        self.subnodes.append(subnode)
+        self._subnodes.append(subnode)
 
     def get_subnodes_amount(self):
         """返回子节点的数量"""
-        return self.subnodes.__len__()
+        return self._subnodes.__len__()
+
+    def get_subnodes(self) -> list:
+        """return subnodes of list form"""
+        return self._subnodes
+
+    def __eq__(self, other):
+        if not super(FolderNode, self).__eq__(other):
+            return False
+        if set(self._subnodes) == set(other._subnodes):
+            return True
+        return False
+
+    def __hash__(self):
+        return super(FolderNode, self).__hash__()
 
 
 class FileTree(object):
@@ -54,6 +89,58 @@ class FileTree(object):
         ex = cls.__new__(cls)
         ex._tree = ex._create_help(folder)
         return ex
+
+    @classmethod
+    def from_json(cls, file):
+        """使用一个JSON文件初始化树"""
+        ex = cls.__new__(cls)
+        ex._tree = FileTree.dict2tree(load_dict(file))
+        return ex
+
+    def save_json(self, folder):
+        """保存为JSON格式的文件 """
+        save_dict(folder, self.convert2dict())
+
+    def convert2dict(self) -> dict:
+        """将树转化为易于转化为dict的形式(尽量兼容JSON）
+        
+        :return: dict object
+        """
+
+        def func(node):
+            rst = {key: value for key, value in node.__dict__.items()
+                   if any([isinstance(value, x) for x in [str, float, int]])}
+            if isinstance(node, FolderNode):
+                subnodes = [func(x) for x in node.get_subnodes()]
+                rst.update({'subnodes': subnodes})
+
+            return rst
+
+        return func(self._tree)
+
+    @staticmethod
+    def dict2tree(dict):
+        """将 convert2dict 的过程反过来"""
+
+        def func(node):
+            f = None
+            ls = []
+            for k, v in node.items():
+                if k == 'subnodes':
+                    f = FolderNode()
+                    for sub in v:
+                        f.add_subnode(func(sub))
+                else:
+                    ls.append((k, v))
+
+            if not f:
+                f = FileNode()
+            for k, v in ls:
+                setattr(f, k, v)
+
+            return f
+
+        return func(dict)
 
     def _create_help(self, _path: str) -> Union[FileNode, FolderNode]:
         """
@@ -109,9 +196,7 @@ class FileTree(object):
             rst = ''
 
             indention[cur_level] = tree.get_subnodes_amount()
-            for subnode in tree.subnodes:
-                subnode.name = subnode.name
-                subnode = subnode
+            for subnode in tree.get_subnodes():
 
                 # FIXME: \n in linux
                 for l in range(cur_level):

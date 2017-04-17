@@ -44,7 +44,8 @@ class TreeNode(object):
 
 class FileNode(TreeNode):
     """File Node"""
-    pass
+    def __repr__(self):
+        return "<FileNode filename: {}".format(self.name)
 
 
 class FolderNode(TreeNode):
@@ -75,9 +76,15 @@ class FolderNode(TreeNode):
     def __hash__(self):
         return super(FolderNode, self).__hash__()
 
+    def __repr__(self):
+        return "<FolderNode foldername: {}>".format(self.name)
+
 
 class FileTree(object):
     """文件树"""
+
+    def __init__(self):
+        self._tree = None
 
     @classmethod
     def from_folder(cls, folder):
@@ -119,7 +126,7 @@ class FileTree(object):
         return func(self._tree)
 
     @staticmethod
-    def dict2tree(dict):
+    def dict2tree(_dict):
         """将 convert2dict 的过程反过来"""
 
         def func(node):
@@ -140,7 +147,7 @@ class FileTree(object):
 
             return f
 
-        return func(dict)
+        return func(_dict)
 
     def _create_help(self, _path: str) -> Union[FileNode, FolderNode]:
         """
@@ -187,9 +194,7 @@ class FileTree(object):
         pass
 
     def graph(self, ctime=False):
-        """
-        图形化的树形结构
-        """
+        """ 图形化的树形结构 """
 
         def get_tree(tree, cur_level, indention={}):
             """递归的打印tree"""
@@ -221,5 +226,5 @@ class FileTree(object):
 
         return get_tree(self._tree, 0)
 
-    def __str__(self):
-        return "<FileTree {}>".format(self._tree)
+    def __repr__(self):
+        return "<FileTree: folder in {}>".format(self._tree.name) if self._tree else "<FileTree: tree is None>"

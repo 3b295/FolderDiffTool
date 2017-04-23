@@ -66,13 +66,13 @@ class TreeNodeTest(unittest.TestCase):
         f = TreeNode()
         f2 = TreeNode()
 
-        f.atime = 'test atime'
+        f.attrs['atime'] = 'test atime'
         self.assertNotEquals(f, f2)
-        f2.atime = 'not atime'
+        f2.attrs['atime'] = 'not atime'
         self.assertNotEquals(f, f2)
-        f.ctime = 'test ctime'
+        f.attrs['ctime'] = 'test ctime'
         self.assertNotEquals(f, f2)
-        f2.xxx = 'xxx'
+        f2.attrs['xxx'] = 'xxx'
         self.assertNotEquals(f, f2)
 
 

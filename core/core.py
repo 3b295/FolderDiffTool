@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
 import os
 import time
+import copy
 from typing import Union
+from hashlib import sha1
 
 from .tools.serialization import load_dict, save_dict
+from .tools.color_print import Green, Red, Black, Blue
 
 STRFTIME_TEMP = '%Y-%m-%d %H:%M:%S'
 
@@ -13,39 +16,31 @@ class TreeNode(object):
 
     # Todo: add __annotations__ for function
     def __init__(self, name=None, *args, **kwargs):
+        self.attrs = {}
         self.name = name
         try:
-            self.ctime = kwargs.get('ctime', None)
-            self.atime = kwargs.get('atime', None)
+            self.attrs['ctime'] = kwargs.get('ctime', None)
+            self.attrs['atime'] = kwargs.get('atime', None)
+            self.attrs['mtime'] = kwargs.get('mtime', None)
         except ValueError as e:
             pass
 
     def __eq__(self, other):
-        if len(self.__dict__) != len(other.__dict__):
-            return False
-
-        if not isinstance(other, self.__class__):
-            return False
-
-        for k, v in self.__dict__.items():
-            if any([lambda x: isinstance(t, x) for t in [str, int, float]]):
-                if v != other.__dict__.get(k, None):
-                    return False
-
-        return True
+        if isinstance(other, self.__class__) and self.attrs == other.attrs and self.name == other.name:
+            return True
+        return False
 
     def __repr__(self):
-        return "< {}'s object name: {} >".format(self.__class__, self.name)
+        return "< {} name: {} {}>".format(self.__class__, self.name, self.__hash__())
 
     def __hash__(self):
-        # FIXME: 这个hash只是能用， 我不知道是否是合适的写法
-        return hash(''.join([k+str(v) for k, v in self.__dict__.items()]))
+        # 一个文件的全部属性相等（不包括名字）， 就认为他们相等
+        return hash(frozenset(sorted(self.attrs.items())))
 
 
 class FileNode(TreeNode):
     """File Node"""
-    def __repr__(self):
-        return "<FileNode filename: {}".format(self.name)
+    pass
 
 
 class FolderNode(TreeNode):
@@ -53,19 +48,20 @@ class FolderNode(TreeNode):
 
     def __init__(self, *args, **kwargs):
         super(FolderNode, self).__init__(*args, **kwargs)
-        self._subnodes = []
+        self._subnodes = set()
 
     def add_subnode(self, subnode):
-        self._subnodes.append(subnode)
+        self._subnodes.add(subnode)
 
     def get_subnodes_amount(self):
         """返回子节点的数量"""
         return self._subnodes.__len__()
 
-    def get_subnodes(self) -> list:
-        """return subnodes of list form"""
+    def get_subnodes(self) -> set:
+        """return subnodes of set form"""
         return self._subnodes
 
+    # FIXME: folder属性相等和子节点属性相等应该分离成两个函数
     def __eq__(self, other):
         if not super(FolderNode, self).__eq__(other):
             return False
@@ -75,9 +71,6 @@ class FolderNode(TreeNode):
 
     def __hash__(self):
         return super(FolderNode, self).__hash__()
-
-    def __repr__(self):
-        return "<FolderNode foldername: {}>".format(self.name)
 
 
 class FileTree(object):
@@ -115,8 +108,7 @@ class FileTree(object):
         """
 
         def func(node):
-            rst = {key: value for key, value in node.__dict__.items()
-                   if any([isinstance(value, x) for x in [str, float, int]])}
+            rst = {'name': node.name, 'attrs': node.attrs}
             if isinstance(node, FolderNode):
                 subnodes = [func(x) for x in node.get_subnodes()]
                 rst.update({'subnodes': subnodes})
@@ -162,13 +154,13 @@ class FileTree(object):
         elif os.path.isdir(_path):
             foldername = _path.split('\\')[-1]
             rst = FolderNode(foldername, **self._get_date(_path))
-            all = os.listdir(_path)
+            fs = os.listdir(_path)
 
-            for f in all:
+            for f in fs:
                 whole_f = os.path.join(_path, f)
                 rst.add_subnode(self._create_help(whole_f))
         else:
-            raise Exception()
+            raise PathStrError('_path is {}'.format(_path))
 
         return rst
 
@@ -180,8 +172,9 @@ class FileTree(object):
         :return: 详细的文件信息
         """
         rst = {
-            'ctime': os.path.getctime(folder),
-            'atime': os.path.getatime(folder),
+            'ctime': time.strftime(STRFTIME_TEMP, time.localtime(os.path.getctime(folder))),
+            'atime': time.strftime(STRFTIME_TEMP, time.localtime(os.path.getatime(folder))),
+            'mtime': time.strftime(STRFTIME_TEMP, time.localtime(os.path.getmtime(folder))),
         }
         return rst
 
@@ -191,9 +184,41 @@ class FileTree(object):
         :param other: other tree deffed
         :return: None
         """
-        pass
 
-    def graph(self, ctime=False):
+        def rec(former, latter):
+            rst = former.__class__()
+
+            if isinstance(rst, FolderNode):
+                for i in set(latter.attrs.keys()) | set(former.attrs.keys()):
+                    if i in ['mtime']:  # 文件夹记录mtime的话 页面有点乱
+                        continue
+                    rst.attrs[i] = DoalData(former.attrs.get(i, None), latter.attrs.get(i, None))
+
+                ls = {x.name: x for x in latter.get_subnodes()}
+                for sub in former.get_subnodes():
+                    l = ls.pop(sub.name, None)
+                    if l:
+                        rst.add_subnode(rec(sub, l))
+                    else:
+                        rst.add_subnode(rec(sub, sub.__class__()))
+
+                for v in ls.values():
+                    rst.add_subnode(rec(v.__class__(), v))
+
+            else:
+                for i in set(latter.attrs.keys()) | set(former.attrs.keys()):
+                    rst.attrs[i] = DoalData(former.attrs.get(i, None), latter.attrs.get(i, None))
+
+            rst.name = DoalData(former.name, latter.name)
+
+            return rst
+
+        rst = DiffFileTree()
+        rst._tree = rec(self._tree, other._tree)
+
+        return rst
+
+    def graph(self, ctime=False, atime=False, mtime=False):
         """ 图形化的树形结构 """
 
         def get_tree(tree, cur_level, indention={}):
@@ -210,7 +235,16 @@ class FileTree(object):
                 extra_data = ''
                 #  添加额外的内容
                 if ctime:
-                    extra_data += time.strftime(STRFTIME_TEMP, time.localtime(subnode.ctime))
+                    extra_data += "\t{}\t".format(subnode.attrs['ctime'])
+                if atime:
+                    extra_data += "\t{}\t".format(subnode.attrs['atime'])
+                #  FIXME: 文件夹不想显示mtime属性， 先暂时屏蔽掉
+                if mtime:
+                    m = subnode.attrs['mtime']
+                    if m:
+                        extra_data += "\t{}\t".format(m)
+                # from IPython import embed
+                # embed()
 
                 if indention[cur_level] > 1:
                     rst += '├── {}\t\t\t{}\n'.format(subnode.name, extra_data)
@@ -227,4 +261,64 @@ class FileTree(object):
         return get_tree(self._tree, 0)
 
     def __repr__(self):
-        return "<FileTree: folder in {}>".format(self._tree.name) if self._tree else "<FileTree: tree is None>"
+        return "<FileTree: folder in {}>".format(self._tree.name) if self._tree else "<FileTree: None>"
+
+
+class DiffFileTree(FileTree):
+    """表示两棵树diff的结果
+    name   attrs中的数据全部被变成DoalDta类型的双重数据
+    """
+    pass
+
+
+class DoalData(object):
+    """同时储存新旧两个值"""
+    NEW = 1
+    CHANGE = 2
+    DEL = 3
+    NOCHANGE = 4
+
+    def __init__(self, old, new):
+        self.new = new
+        self.old = old
+        if new:
+            if old:
+                if new == old:
+                    self.type = self.NOCHANGE
+                else:
+                    self.type = self.CHANGE
+            else:
+                self.type = self.NEW
+        else:
+            if old:
+                self.type = self.DEL
+            else:
+                raise TypeError('old and new can not be None!')
+
+    def __str__(self):
+        if self.type == self.NEW:
+            return Green(str(self.new))
+        elif self.type == self.DEL:
+            return Blue(str(self.old))
+        elif self.type == self.CHANGE:
+            return Red(str(self.old) + ' --> ' + str(self.new))
+        elif self.type == self.NOCHANGE:
+            return str(self.old)
+        else:
+            raise TypeError("<DoalData#type> is only [NEW, CHANGE, OLD]")
+
+    def __getattr__(self, item):
+        # FIXME: 子元素究竟用谁的子节点， 先暂时用原来的， 应该用两个子节点diff 过后的结果来做的
+        if self.type == self.DEL:
+            raise AttributeError("<DoalData> data is deleted")
+        elif self.type == self.NEW:
+            return getattr(self.new, item)
+        elif self.type == self.CHANGE:
+            return getattr(self.old, item)
+        else:
+            raise TypeError("<DoalData#type> is only [NEW, CHANGE, OLD]")
+
+
+class PathStrError(Exception):
+    """path string Error """
+    pass
